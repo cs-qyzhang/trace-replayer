@@ -188,6 +188,18 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                             "span_time".to_string(),
                             format!("{span_time:.3}"),
                         );
+
+                        // Calculate TPOT (Time Per Output Token)
+                        if let (Some(total_time), Some(output_len)) = (
+                            metrics.get("total_time").and_then(|v| v.parse::<f64>().ok()),
+                            metrics.get("output_length").and_then(|v| v.parse::<f64>().ok()),
+                        ) {
+                            if output_len > 0.0 {
+                                let tpot = total_time / output_len;
+                                metrics.insert("tpot".to_string(), format!("{tpot:.3}"));
+                            }
+                        }
+
                         response_sender.send(metrics).unwrap();
                     }
                     Err(RequestError::Timeout) => {
