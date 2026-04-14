@@ -39,7 +39,7 @@ impl LLMApi for OpenAIApi {
     async fn parse_response(
         response: Response,
         stream: bool,
-        timeout_duration: Duration,
+        timeout_duration: Option<Duration>,
     ) -> Result<BTreeMap<String, String>, RequestError> {
         let mut result = BTreeMap::new();
         result.insert("status".to_string(), response.status().as_str().to_string());
@@ -67,54 +67,47 @@ impl LLMApi for OpenAIApi {
         let start_time = TokioInstant::now();
 
         loop {
-            if start_time.elapsed() > timeout_duration {
-                return Err(RequestError::Timeout);
-            }
-            let remaining_duration = timeout_duration - start_time.elapsed();
-
-            let read_future = reader.read_line(&mut line);
-            match tokio_timeout(remaining_duration, read_future).await {
-                Ok(Ok(0)) => break, // EOF
-                Ok(Ok(_)) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        line.clear();
-                        continue;
-                    }
-
-                    if trimmed.starts_with("data: ") {
-                        let data_str = &trimmed[6..];
-
-                        if data_str == "[DONE]" {
-                            break;
-                        }
-                        if data_str.contains(r#""delta""#) {
-                            let now = TokioInstant::now();
-                            token_count += 1;
-
-                            if first_token_time.is_none() {
-                                first_token_time = Some(now);
-                                let first_token_duration =
-                                    now.duration_since(start_time).as_secs_f64() * 1000.0;
-                                result.insert(
-                                    "first_token_time".to_string(),
-                                    format!("{first_token_duration:.3}"),
-                                );
-                            } else if let Some(last) = last_token_time {
-                                let tbt = now.duration_since(last).as_secs_f64() * 1000.0;
-                                tbt_values.push(tbt);
-                                if token_count > 2 {
-                                    tbt_except_first.push(tbt);
-                                }
-                            }
-
-                            last_token_time = Some(now);
-                        }
-                    }
-                    line.clear();
+            if let Some(timeout) = timeout_duration {
+                if start_time.elapsed() > timeout {
+                    return Err(RequestError::Timeout);
                 }
-                Ok(Err(e)) => return Err(RequestError::StreamErr(e)),
-                Err(_) => return Err(RequestError::Timeout),
+                let remaining_duration = timeout - start_time.elapsed();
+                let read_future = reader.read_line(&mut line);
+                match tokio_timeout(remaining_duration, read_future).await {
+                    Ok(Ok(0)) => break, // EOF
+                    Ok(Ok(_)) => {
+                        Self::process_line(
+                            &mut line,
+                            &mut first_token_time,
+                            &mut last_token_time,
+                            &mut token_count,
+                            &mut tbt_values,
+                            &mut tbt_except_first,
+                            start_time,
+                            &mut result,
+                        );
+                    }
+                    Ok(Err(e)) => return Err(RequestError::StreamErr(e)),
+                    Err(_) => return Err(RequestError::Timeout),
+                }
+            } else {
+                // No timeout
+                match reader.read_line(&mut line).await {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        Self::process_line(
+                            &mut line,
+                            &mut first_token_time,
+                            &mut last_token_time,
+                            &mut token_count,
+                            &mut tbt_values,
+                            &mut tbt_except_first,
+                            start_time,
+                            &mut result,
+                        );
+                    }
+                    Err(e) => return Err(RequestError::StreamErr(e)),
+                }
             }
         }
 
@@ -177,5 +170,55 @@ impl LLMApi for OpenAIApi {
         }
 
         Ok(result)
+    }
+}
+
+impl OpenAIApi {
+    fn process_line(
+        line: &mut String,
+        first_token_time: &mut Option<TokioInstant>,
+        last_token_time: &mut Option<TokioInstant>,
+        token_count: &mut u32,
+        tbt_values: &mut Vec<f64>,
+        tbt_except_first: &mut Vec<f64>,
+        start_time: TokioInstant,
+        result: &mut BTreeMap<String, String>,
+    ) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            line.clear();
+            return;
+        }
+
+        if trimmed.starts_with("data: ") {
+            let data_str = &trimmed[6..];
+
+            if data_str == "[DONE]" {
+                return;
+            }
+            if data_str.contains(r#""delta""#) {
+                let now = TokioInstant::now();
+                *token_count += 1;
+
+                if first_token_time.is_none() {
+                    *first_token_time = Some(now);
+                    let first_token_duration =
+                        now.duration_since(start_time).as_secs_f64() * 1000.0;
+                    result.insert(
+                        "first_token_time".to_string(),
+                        format!("{first_token_duration:.3}"),
+                    );
+                } else if let Some(last) = *last_token_time {
+                    let tbt = now.duration_since(last).as_secs_f64() * 1000.0;
+                    tbt_values.push(tbt);
+                    if *token_count > 2 {
+                        tbt_except_first.push(tbt);
+                    }
+                }
+
+                *last_token_time = Some(now);
+            }
+        }
+        line.clear();
     }
 }

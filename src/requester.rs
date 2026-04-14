@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    error::Error,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering},
@@ -42,7 +43,7 @@ async fn post_with_timeout<A: 'static + LLMApi + Send>(
     client: reqwest::Client,
     endpoint: &str,
     json_body: String,
-    timeout: Duration,
+    timeout: Option<Duration>,
     stream: bool,
 ) -> Result<BTreeMap<String, String>, RequestError> {
     let mut req = client
@@ -50,8 +51,10 @@ async fn post_with_timeout<A: 'static + LLMApi + Send>(
         .body(json_body)
         .header("Content-Type", "application/json");
 
-    if !stream {
-        req = req.timeout(timeout);
+    if let Some(t) = timeout {
+        if !stream {
+            req = req.timeout(t);
+        }
     }
     if A::AIBRIX_PRIVATE_HEADER {
         req = req.header(
@@ -83,6 +86,7 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
     interrupt_flag: Arc<AtomicBool>,
     ttft_slo: f32,
     tpot_slo: f32,
+    no_slo: bool,
     stream: bool,
     early_stop_error_threshold: Option<u32>,
 ) -> JoinHandle<Result<(), i32>> {
@@ -156,11 +160,16 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                 let json_body = A::request_json_body(prompt, output_length, stream);
                 let s_time = get_timestamp();
                 let s_time_drift = s_time - next_timestamp as f64;
+                let timeout_duration = if no_slo {
+                    None
+                } else {
+                    Some(Duration::from_secs(timeout_secs_upon_slo(output_length, ttft_slo, tpot_slo)))
+                };
                 match post_with_timeout::<A>(
                     client,
                     endpoint.as_str(),
                     json_body.to_string(),
-                    Duration::from_secs(timeout_secs_upon_slo(output_length, ttft_slo, tpot_slo)),
+                    timeout_duration,
                     stream,
                 )
                 .await
@@ -203,14 +212,34 @@ pub fn spawn_request_loop_with_timestamp<A: 'static + LLMApi + Send>(
                         error_count.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(RequestError::Other(error)) => {
+                        let underlying = error
+                            .source()
+                            .map(|e| format!(" (cause: {})", e))
+                            .unwrap_or_default();
+                        let error_type = if error.is_timeout() {
+                            "timeout"
+                        } else if error.is_connect() {
+                            "connection"
+                        } else if error.is_request() {
+                            "request"
+                        } else {
+                            "unknown"
+                        };
                         tracing::error!(
-                            "Request#{data_index}::({input_length}|{output_length}) error: {error}",
+                            "Request#{data_index}::({input_length}|{output_length}) {} error: {error}{underlying}",
+                            error_type,
                         );
                         error_count.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(RequestError::StreamErr(error)) => {
+                        let underlying = error
+                            .source()
+                            .map(|e| format!(" (cause: {})", e))
+                            .unwrap_or_default();
                         tracing::error!(
-                            "Request#{data_index}::({input_length}|{output_length}) stream error: {error}",
+                            "Request#{data_index}::({input_length}|{output_length}) stream error: {:?}{}",
+                            error,
+                            underlying,
                         );
                         error_count.fetch_add(1, Ordering::Relaxed);
                     }

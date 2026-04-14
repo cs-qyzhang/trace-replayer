@@ -36,7 +36,7 @@ impl LLMApi for TGIApi {
     async fn parse_response(
         response: Response,
         _stream: bool,
-        _timeout_duration: Duration,
+        _timeout_duration: Option<Duration>,
     ) -> Result<BTreeMap<String, String>, RequestError> {
         let mut map = BTreeMap::new();
         map.insert("status".to_string(), response.status().as_str().to_string());

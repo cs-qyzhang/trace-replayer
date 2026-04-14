@@ -99,6 +99,10 @@ struct Args {
     #[clap(long, default_value_t = 0.06)]
     tpot_slo: f32,
 
+    /// Disable SLO-based timeout (no timeout will be applied)
+    #[clap(long, default_value_t = false)]
+    no_slo: bool,
+
     /// Enable streaming mode for API requests
     #[clap(long, default_value_t = false)]
     stream: bool,
@@ -131,6 +135,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
         aibrix_route,
         ttft_slo,
         tpot_slo,
+        no_slo,
         stream,
         metric_percentile,
         early_stop_error_threshold,
@@ -215,6 +220,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                no_slo,
                 stream,
                 early_stop_error_threshold,
             )
@@ -258,6 +264,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                no_slo,
                 stream,
                 early_stop_error_threshold,
             )
@@ -292,6 +299,7 @@ async fn async_main(args: Args) -> Result<(), i32> {
                 interrupt_flag.clone(),
                 ttft_slo,
                 tpot_slo,
+                no_slo,
                 stream,
                 early_stop_error_threshold,
             )

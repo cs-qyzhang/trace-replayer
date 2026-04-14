@@ -28,6 +28,6 @@ pub trait LLMApi: Copy + Clone + Send + Sync {
     async fn parse_response(
         response: Response,
         stream: bool,
-        timeout_duration: Duration,
+        timeout_duration: Option<Duration>,
     ) -> Result<BTreeMap<String, String>, RequestError>;
 }
