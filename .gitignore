@@ -4,6 +4,7 @@
 Cargo.lock
 *.csv
 *.jsonl
+*.json
 *.png
 *.pdf
 *.log

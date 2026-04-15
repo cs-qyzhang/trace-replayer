@@ -1,5 +1,11 @@
 # LLM anonymous Trace-Replayer
 
+## Quick Start
+
+```bash
+./target/release/client --tokenizer /data/llm/Qwen3-8B/tokenizer.json --tokenizer-config /data/llm/Qwen3-8B/tokenizer_config.json --endpoint http://localhost:30000/v1/chat/completions --api openai --dataset bailian --dataset-path /home/qyzhang/llm-trace-analysis/qwen-bailian-trace/qwen_traceB_blksz_16.jsonl --scale-factor 0.1 --time-in-secs 40 --num-producer 1 --channel-capacity 4096 --output-path ./client.jsonl --model-name /data/llm/Qwen3-8B --no-slo --stream
+```
+
 **Trace-Replayer** is a Rust-based tool for replaying **anonymous traces** (e.g., https://github.com/alibaba-edu/qwen-bailian-usagetraces-anon) containing block hashes on backend serving systems (e.g., vLLM, a cluster of vLLM, etc), making it easier for developers to conduct **debugging and performance benchmarking** of LLM serving systems.
 
 At a high-level, it reconstructs **prompts** based on **prompt length + block hashes** recorded in the trace (preserving the same KVCache hit patterns) on-the-fly,
